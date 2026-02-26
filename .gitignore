@@ -1,0 +1,8 @@
+.env
+session.json
+.claude/
+screenshots/
+.venv/
+.vscode/
+__pycache__/
+*.pyc
