@@ -20,8 +20,6 @@ RESTAURANT_URL = os.getenv(
     "https://consumers.pluxee.co.il/restaurants/pickup/restaurant/33237",
 )
 PREORDER_URL = "https://consumers.pluxee.co.il/restaurants/pickup/preorder"
-COUPON_AMOUNT = int(os.getenv("COUPON_AMOUNT", "30"))
-
 # Timeouts (ms)
 NAVIGATION_TIMEOUT = 30_000
 ACTION_TIMEOUT     = 15_000

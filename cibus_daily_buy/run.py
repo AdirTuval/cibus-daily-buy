@@ -17,6 +17,7 @@ from cibus_daily_buy.config import (
 from cibus_daily_buy.login import login
 from cibus_daily_buy.purchase import (
     add_to_cart,
+    check_budget,
     cleanup_cart,
     confirm_order,
     navigate_to_checkout,
@@ -79,16 +80,19 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False,
             if capture_reorder:
                 return _capture_reorder_mode(page)
 
-            # Step 4: Navigate to restaurant
+            # Step 4: Check budget and choose coupon amount
+            coupon_amount = check_budget(page)
+
+            # Step 5: Navigate to restaurant
             navigate_to_restaurant(page)
 
-            # Step 5: Add to cart
-            add_to_cart(page)
+            # Step 6: Add to cart
+            add_to_cart(page, coupon_amount)
 
-            # Step 6: Checkout
+            # Step 7: Checkout
             checkout_ok = navigate_to_checkout(page)
 
-            # Step 7: Dry run — verify & clean up
+            # Step 8: Dry run — verify & clean up
             if dry_run:
                 if checkout_ok:
                     log.info("DRY RUN — full flow verified successfully!")
@@ -98,7 +102,7 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False,
                 log.info("DRY RUN complete")
                 return checkout_ok
 
-            # Step 8: Confirm order (live)
+            # Step 9: Confirm order (live)
             if not checkout_ok:
                 raise RuntimeError("Checkout page not ready — aborting")
             confirm_order(page)

@@ -56,9 +56,10 @@ config  ←── telegram
 
 1. Launch Chromium with `he-IL` locale
 2. Navigate to Cibus homepage and log in (with session reuse + OTP via Telegram)
-3. Navigate to restaurant page
-4. Add coupon to cart by price label
-5. Navigate to checkout and confirm (skipped in `--dry-run` mode, which also cleans up cart)
+3. Check remaining budget and choose coupon amount (₪100 if budget >= 100, else ₪30)
+4. Navigate to restaurant page
+5. Add coupon to cart by price label
+6. Navigate to checkout and confirm (skipped in `--dry-run` mode, which also cleans up cart)
 
 ### Key Patterns
 
