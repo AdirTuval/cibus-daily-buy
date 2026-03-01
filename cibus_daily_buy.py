@@ -42,6 +42,7 @@ RESTAURANT_URL = os.getenv(
     "RESTAURANT_URL",
     "https://consumers.pluxee.co.il/restaurants/pickup/restaurant/33237",
 )
+PREORDER_URL = "https://consumers.pluxee.co.il/restaurants/pickup/preorder"
 COUPON_AMOUNT = int(os.getenv("COUPON_AMOUNT", "30"))
 
 # Timeouts (ms)
@@ -181,7 +182,7 @@ def is_authenticated(page) -> bool:
 # MAIN AUTOMATION FLOW
 # ============================================================
 
-def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False):
+def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False, capture_reorder: bool = False):
     log.info("=" * 50)
     log.info(f"Cibus Daily Buy — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'} | Headless: {headless}")
@@ -201,6 +202,24 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False)
         page = context.new_page()
         page.set_default_timeout(NAVIGATION_TIMEOUT)
 
+        # Log Pluxee API traffic for debugging / discovering cart-clearing endpoints
+        def _log_request(request):
+            if "pluxee.co.il/api" in request.url.lower():
+                log.info(f"  >> {request.method} {request.url}")
+                if request.post_data:
+                    log.info(f"     PostData: {request.post_data[:1000]}")
+
+        def _log_response(response):
+            if "pluxee.co.il/api" in response.url.lower():
+                log.info(f"  << {response.status} {response.url}")
+                try:
+                    log.info(f"     Body: {response.text()[:1000]}")
+                except Exception:
+                    pass
+
+        page.on("request", _log_request)
+        page.on("response", _log_response)
+
         try:
             # ------------------------------------------
             # STEP 1: Navigate to Cibus
@@ -209,6 +228,7 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False)
             # "domcontentloaded" is faster than "networkidle"; Angular hydrates async
             # so we wait_for_selector separately where needed
             page.goto(CIBUS_URL, wait_until="domcontentloaded")
+            time.sleep(2)
             take_screenshot(page, "01_homepage")
 
             # ------------------------------------------
@@ -282,52 +302,128 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False)
                 log.info("Login complete")
 
             # ------------------------------------------
-            # STEP 3: Navigate to restaurant page
+            # CAPTURE REORDER MODE (discovery)
             # ------------------------------------------
-            log.info(f"Navigating to restaurant page: {RESTAURANT_URL}")
-            page.goto(RESTAURANT_URL, wait_until="domcontentloaded")
-            # Angular renders cards asynchronously after DOMContentLoaded; explicit wait is required
-            page.wait_for_selector(".card", timeout=15_000)
-            take_screenshot(page, "04_restaurant_page")
-
-            # ------------------------------------------
-            # STEP 4: Find ₪COUPON_AMOUNT option and click its + button
-            # ------------------------------------------
-            log.info(f"Looking for ₪{COUPON_AMOUNT} option...")
-            # Two card sections on the page may match the price label; .first picks the correct top one
-            card = page.locator(f'.card:has(.card-footer label:text("₪{COUPON_AMOUNT}.00"))').first
-            # The + button is <input type="image">, not <button> — standard button selectors won't find it
-            add_btn = card.locator('input[type="image"]')
-            add_btn.scroll_into_view_if_needed()
-            add_btn.click()
-            time.sleep(2)
-            log.info(f"Added ₪{COUPON_AMOUNT} coupon to basket")
-            take_screenshot(page, "05_added_to_basket")
-
-            # ------------------------------------------
-            # STEP 5: Dry-run stop point
-            # ------------------------------------------
-            if dry_run:
-                log.info("DRY RUN — navigating to checkout page...")
-                page.goto("https://consumers.pluxee.co.il/restaurants/pickup/preorder",
+            if capture_reorder:
+                log.info("CAPTURE MODE — navigating to order history")
+                page.goto("https://consumers.pluxee.co.il/restaurants/orders",
                           wait_until="domcontentloaded")
-                time.sleep(1)
-                take_screenshot(page, "06_preorder_page")
-                log.info("DRY RUN — stopping before confirm (waiting 3s)")
-                time.sleep(3)
+                page.wait_for_timeout(3000)
+                take_screenshot(page, "orders_page")
+                log.info("CAPTURE MODE — click the reorder button in the browser.")
+                log.info("All API calls are being logged. Waiting 20s...")
+                # Must use Playwright's wait (not time.sleep) to keep the event loop
+                # alive so page.on("request"/"response") handlers fire.
+                page.wait_for_timeout(20_000)
                 return True
 
             # ------------------------------------------
-            # STEP 6: Navigate to preorder page and confirm order
+            # STEP 3: Navigate to restaurant page (sets server-side session context)
+            # ------------------------------------------
+            log.info(f"Navigating to restaurant page: {RESTAURANT_URL}")
+            page.goto(RESTAURANT_URL, wait_until="domcontentloaded")
+            page.wait_for_selector(".card", timeout=ACTION_TIMEOUT)
+            take_screenshot(page, "04_restaurant_page")
+
+            # ------------------------------------------
+            # STEP 4: Add coupon to cart
+            # ------------------------------------------
+            card_selector = f'.card:has(.card-footer label:text("₪{COUPON_AMOUNT}.00"))'
+            card = page.locator(card_selector).first
+            plus_btn = card.locator('input[type="image"]')
+            plus_btn.wait_for(state="visible", timeout=ACTION_TIMEOUT)
+
+            log.info(f"Clicking + on ₪{COUPON_AMOUNT} card")
+            with page.expect_response("**/api/main.py") as resp_info:
+                plus_btn.click()
+            response = resp_info.value
+            body = response.json()
+            log.info(f"prx_add_prod_to_cart response: code={body.get('code')}, msg={body.get('msg')}")
+            if body.get("code") != 0:
+                raise RuntimeError(f"Failed to add to cart: code={body.get('code')}, msg={body.get('msg')}")
+            log.info(f"Added ₪{COUPON_AMOUNT} to cart")
+            take_screenshot(page, "05_after_add_to_cart")
+
+            # ------------------------------------------
+            # STEP 5: Navigate to checkout page
             # ------------------------------------------
             log.info("Navigating to checkout...")
-            page.goto("https://consumers.pluxee.co.il/restaurants/pickup/preorder",
-                      wait_until="domcontentloaded")
-            time.sleep(1)
+            page.goto(PREORDER_URL, wait_until="domcontentloaded")
+            time.sleep(2)
             take_screenshot(page, "06_preorder_page")
 
+            # Verify checkout page is stable
+            checkout_ok = False
+            if "preorder" in page.url:
+                confirm_btn = page.locator('button:has-text("אישור ההזמנה")')
+                try:
+                    confirm_btn.wait_for(state="visible", timeout=ACTION_TIMEOUT)
+                    checkout_ok = True
+                    log.info("Checkout page stable — confirm button visible")
+                except PlaywrightTimeout:
+                    log.warning("Checkout page loaded but confirm button not found")
+            else:
+                log.warning(f"Redirected away from checkout: {page.url}")
+
+            if dry_run:
+                # --- DRY RUN: verify result and clean up cart ---
+                if checkout_ok:
+                    log.info("DRY RUN — full flow verified successfully!")
+                else:
+                    log.warning("DRY RUN — checkout verification FAILED")
+
+                # Attempt to remove item from cart via trash icon on checkout page
+                log.info("DRY RUN — cleaning up cart...")
+                cleaned = False
+                trash_selectors = [
+                    'img[src*="icon-trash"]',         # exact match for the known SVG
+                    'img[src*="trash"]',              # any trash icon image
+                    '[class*="trash"]',               # fallback: element with "trash" in class
+                    '[class*="delete"]',              # fallback: element with "delete" in class
+                ]
+                # Navigate back to checkout if we got redirected
+                if "preorder" not in page.url:
+                    page.goto(PREORDER_URL, wait_until="domcontentloaded")
+                    time.sleep(1)
+
+                for sel in trash_selectors:
+                    try:
+                        trash_btn = page.locator(sel).first
+                        if trash_btn.is_visible(timeout=2000):
+                            log.info(f"Found trash button: {sel}")
+                            take_screenshot(page, "07_before_trash_click")
+                            trash_btn.click()
+                            time.sleep(2)
+                            take_screenshot(page, "08_after_trash_click")
+                            cleaned = True
+                            log.info("Cart item removed via trash icon")
+                            break
+                    except Exception:
+                        continue
+
+                if not cleaned:
+                    log.warning("Could not find trash button — deleting session.json as fallback")
+                    take_screenshot(page, "07_trash_not_found")
+                    try:
+                        os.remove(SESSION_FILE)
+                        log.info(f"Deleted {SESSION_FILE} — next run will force fresh login")
+                    except FileNotFoundError:
+                        pass
+                else:
+                    save_session(context)
+                    log.info("Session saved with clean cart")
+
+                log.info("DRY RUN complete")
+                return checkout_ok
+
+            # ------------------------------------------
+            # STEP 6: Confirm order (live mode only)
+            # ------------------------------------------
+            if not checkout_ok:
+                raise RuntimeError("Checkout page not ready — aborting")
+
             log.info("Confirming order...")
-            page.locator('button:has-text("אישור ההזמנה")').click()
+            confirm_btn.click()
             page.wait_for_load_state("domcontentloaded")
             time.sleep(3)
             take_screenshot(page, "07_after_confirm")
@@ -356,7 +452,10 @@ if __name__ == "__main__":
     parser.add_argument("--visible", action="store_true", help="Show browser window")
     parser.add_argument("--dry-run", action="store_true", help="Stop before actual purchase")
     parser.add_argument("--fresh-login", action="store_true", help="Ignore saved session and log in from scratch")
+    parser.add_argument("--capture-reorder", action="store_true",
+                        help="Navigate to order history and capture reorder API call")
     args = parser.parse_args()
 
-    success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login)
+    success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login,
+                  capture_reorder=args.capture_reorder)
     sys.exit(0 if success else 1)

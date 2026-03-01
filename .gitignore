@@ -6,3 +6,4 @@ screenshots/
 .vscode/
 __pycache__/
 *.pyc
+*.log
