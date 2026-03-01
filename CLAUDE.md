@@ -23,19 +23,46 @@ python cibus_daily_buy.py --dry-run  # navigate but skip purchase
 
 ## Architecture
 
-Single-file script (`cibus_daily_buy.py`) with this flow:
+Python package (`cibus_daily_buy/`) with a backward-compatible shim (`python cibus_daily_buy.py` still works). Also runnable via `python -m cibus_daily_buy`.
+
+### Package structure
+
+```
+cibus_daily_buy.py              # thin shim → calls cibus_daily_buy.run.main()
+cibus_daily_buy/
+    __init__.py                 # empty
+    __main__.py                 # python -m cibus_daily_buy support
+    config.py                   # all constants, env loading, logger
+    telegram.py                 # send_telegram, ask_telegram
+    browser.py                  # take_screenshot, wait_and_click, save_session, is_authenticated, attach_api_logger
+    login.py                    # login flow + OTP
+    purchase.py                 # restaurant nav, add to cart, checkout, confirm, cleanup
+    run.py                      # orchestrator (run + main) — reads like a recipe
+```
+
+### Import dependency graph (no cycles)
+
+```
+config  ←── telegram
+   ↑         ↑
+   ├── browser ←── login (also imports telegram)
+   │      ↑
+   └── purchase
+          ↑
+        run (imports config, browser, login, purchase)
+```
+
+### Flow
 
 1. Launch Chromium with `he-IL` locale
-2. Navigate to Cibus homepage and log in
-3. Navigate to coupon/gift card section
-4. Search for coupon by `COUPON_KEYWORD` (Hebrew text)
-5. Purchase (skipped in `--dry-run` mode)
-6. Optionally send coupon to self
-
-**Configuration constants** at the top of the file: `CIBUS_URL`, `USERNAME`, `PASSWORD`, `COUPON_KEYWORD`, `COUPON_AMOUNT`.
+2. Navigate to Cibus homepage and log in (with session reuse + OTP via Telegram)
+3. Navigate to restaurant page
+4. Add coupon to cart by price label
+5. Navigate to checkout and confirm (skipped in `--dry-run` mode, which also cleans up cart)
 
 ### Key Patterns
 
 - **Defensive selectors**: Multiple CSS/text selector fallbacks for each element, since the site's HTML varies. Catches `PlaywrightTimeoutError` and tries the next selector.
-- **Debug screenshots**: Taken at each major step (named `01_homepage`, `02_login_page_debug`, etc.) and on errors, saved to `SCREENSHOTS_DIR`.
+- **Debug screenshots**: Taken at each major step (named `01_homepage`, `02_login_filled`, etc.) and on errors, saved to `SCREENSHOT_DIR`.
 - **`wait_and_click()`**: Helper that waits for visibility before clicking, with configurable timeout.
+- **Session persistence**: Saves/loads browser cookies to `session.json` to avoid OTP on every run.
