@@ -57,7 +57,7 @@ cibus_daily_buy/
     __init__.py                 # empty
     __main__.py                 # python -m cibus_daily_buy support
     config.py                   # all constants, env loading, logger
-    telegram.py                 # send_telegram, ask_telegram
+    telegram.py                 # OTPTimeoutError, send_telegram, ask_telegram
     browser.py                  # take_screenshot, wait_and_click, save_session, is_authenticated, attach_api_logger
     login.py                    # login flow + OTP
     purchase.py                 # restaurant nav, add to cart, checkout, confirm, cleanup
@@ -73,7 +73,7 @@ config  ←── telegram
    │      ↑
    └── purchase
           ↑
-        run (imports config, browser, login, purchase)
+        run (imports config, browser, login, purchase, telegram)
 ```
 
 ### Flow
@@ -93,3 +93,4 @@ config  ←── telegram
 - **Session persistence**: Saves/loads browser cookies to `session.json` to avoid OTP on every run.
 - **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `SESSION_FILE`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
 - **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the optional file handler (`--log-file`).
+- **OTP retry loop**: `run()` in `run.py` retries the full login flow up to `MAX_OTP_RETRIES` (3) times on `OTPTimeoutError`. Retries always use `fresh_login=True` to discard stale session state. `ask_telegram()` waits 9 minutes for a Telegram reply (matching OTP lifetime), sends a reminder every 10 s, then raises `OTPTimeoutError` instead of falling back to terminal input.
