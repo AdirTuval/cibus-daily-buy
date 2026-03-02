@@ -9,17 +9,41 @@ A Python Playwright script that automates daily coupon purchases on the Cibus Pl
 ## Setup
 
 ```bash
-pip install playwright
+cp .env.example .env   # fill in CIBUS_USERNAME, CIBUS_PASSWORD (and optionally Telegram vars)
+pip install -r requirements.txt
 playwright install chromium
 ```
 
 ## Running
 
 ```bash
-python cibus_daily_buy.py           # headless mode
-python cibus_daily_buy.py --visible  # show browser window (debug)
-python cibus_daily_buy.py --dry-run  # navigate but skip purchase
+python cibus_daily_buy.py                # headless mode (live purchase)
+python cibus_daily_buy.py --visible      # show browser window (debug)
+python cibus_daily_buy.py --dry-run      # navigate but skip purchase, then clean cart
+python cibus_daily_buy.py --fresh-login  # ignore saved session, force new OTP
+python cibus_daily_buy.py --capture-reorder  # navigate to order history, log API calls for 20s
+python cibus_daily_buy.py --log-file     # write log to logs/<timestamp>_run.log in project root
 ```
+
+## Scheduling (cron)
+
+```cron
+0 8 * * * .venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
+```
+
+Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
+
+## Configuration (`.env`)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `CIBUS_USERNAME` | ✅ | Login email |
+| `CIBUS_PASSWORD` | ✅ | |
+| `TELEGRAM_BOT_TOKEN` | Optional | OTP delivery; falls back to terminal `input()` |
+| `TELEGRAM_CHAT_ID` | Optional | |
+| `RESTAURANT_URL` | Optional | Defaults to store #33237 (hardcoded in `config.py`) |
+
+`PREORDER_URL` is hardcoded in `config.py` (not in `.env`).
 
 ## Architecture
 
@@ -56,7 +80,7 @@ config  ←── telegram
 
 1. Launch Chromium with `he-IL` locale
 2. Navigate to Cibus homepage and log in (with session reuse + OTP via Telegram)
-3. Check remaining budget and choose coupon amount (₪100 if budget >= 100, else ₪30)
+3. Check remaining budget: ₪100 coupon if budget ≥ 100, ₪30 if budget ≥ 30, error if below 30
 4. Navigate to restaurant page
 5. Add coupon to cart by price label
 6. Navigate to checkout and confirm (skipped in `--dry-run` mode, which also cleans up cart)
@@ -67,3 +91,5 @@ config  ←── telegram
 - **Debug screenshots**: Taken at each major step (named `01_homepage`, `02_login_filled`, etc.) and on errors, saved to `SCREENSHOT_DIR`.
 - **`wait_and_click()`**: Helper that waits for visibility before clicking, with configurable timeout.
 - **Session persistence**: Saves/loads browser cookies to `session.json` to avoid OTP on every run.
+- **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `SESSION_FILE`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
+- **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the optional file handler (`--log-file`).

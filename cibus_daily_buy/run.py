@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 import sys
 import time
@@ -10,6 +11,8 @@ from playwright.sync_api import sync_playwright
 from cibus_daily_buy.browser import attach_api_logger, take_screenshot
 from cibus_daily_buy.config import (
     CIBUS_URL,
+    LOG_DIR,
+    LOG_FORMAT,
     NAVIGATION_TIMEOUT,
     SESSION_FILE,
     log,
@@ -25,18 +28,54 @@ from cibus_daily_buy.purchase import (
 )
 
 
+def _add_file_logger():
+    """Attach a FileHandler to the cibus logger → logs/<ts>_run.log."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(LOG_DIR, f"{ts}_run.log")
+    handler = logging.FileHandler(log_path)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.getLogger("cibus").addHandler(handler)
+    return log_path
+
+
 def _launch_browser(p, headless, fresh_login):
     """Launch Chromium, create context with optional session, attach API logger."""
-    browser = p.chromium.launch(headless=headless)
+    launch_kwargs = {"headless": headless}
+    if headless:
+        # Suppress the Automation flag that sites use for bot detection
+        launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+    browser = p.chromium.launch(**launch_kwargs)
+
     context_kwargs = {"viewport": {"width": 1280, "height": 800}, "locale": "he-IL"}
+    if headless:
+        # Replace "HeadlessChrome/..." UA with a normal Chrome UA so the site
+        # cannot detect headless mode via the User-Agent string
+        context_kwargs["user_agent"] = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        )
+
     if fresh_login:
         log.info("Fresh login requested — ignoring saved session")
-    elif os.path.exists(SESSION_FILE):
-        log.info(f"Loading session from {SESSION_FILE}")
-        with open(SESSION_FILE) as f:
-            # Reusing saved cookies avoids triggering OTP on every run
-            context_kwargs["storage_state"] = json.load(f)
+    else:
+        try:
+            with open(SESSION_FILE) as f:
+                # Reusing saved cookies avoids triggering OTP on every run
+                context_kwargs["storage_state"] = json.load(f)
+            log.info(f"Loading session from {SESSION_FILE}")
+        except FileNotFoundError:
+            pass
     context = browser.new_context(**context_kwargs)
+
+    if headless:
+        # Patch JS fingerprint signals before any page script runs
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            if (!window.chrome) { window.chrome = { runtime: {} }; }
+            Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+        """)
+
     page = context.new_page()
     page.set_default_timeout(NAVIGATION_TIMEOUT)
     attach_api_logger(page)
@@ -127,7 +166,13 @@ def main():
     parser.add_argument("--fresh-login", action="store_true", help="Ignore saved session and log in from scratch")
     parser.add_argument("--capture-reorder", action="store_true",
                         help="Navigate to order history and capture reorder API call")
+    parser.add_argument("--log-file", action="store_true",
+                        help="Write log output to logs/<timestamp>_run.log in the project root")
     args = parser.parse_args()
+
+    if args.log_file:
+        log_path = _add_file_logger()
+        log.info(f"Logging to file: {log_path}")
 
     success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login,
                   capture_reorder=args.capture_reorder)

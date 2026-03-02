@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -24,11 +25,15 @@ PREORDER_URL = "https://consumers.pluxee.co.il/restaurants/pickup/preorder"
 NAVIGATION_TIMEOUT = 30_000
 ACTION_TIMEOUT     = 15_000
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Screenshot directory for debugging
-SCREENSHOT_DIR = "./screenshots"
+SCREENSHOT_DIR = str(PROJECT_ROOT / "screenshots")
 
 # Session persistence — avoids triggering OTP on every run
-SESSION_FILE = "./session.json"
+SESSION_FILE = str(PROJECT_ROOT / "session.json")
+
+LOG_DIR = str(PROJECT_ROOT / "logs")
 
 # Telegram OTP delivery (optional — falls back to terminal input if not set)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -38,9 +43,11 @@ TELEGRAM_CHAT_ID   = int(os.getenv("TELEGRAM_CHAT_ID", "0") or "0")
 # LOGGING
 # ============================================================
 
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format=LOG_FORMAT,
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger("cibus")
