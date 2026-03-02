@@ -18,6 +18,7 @@ from cibus_daily_buy.config import (
     log,
 )
 from cibus_daily_buy.login import login
+from cibus_daily_buy.telegram import OTPTimeoutError
 from cibus_daily_buy.purchase import (
     add_to_cart,
     check_budget,
@@ -97,66 +98,81 @@ def _capture_reorder_mode(page) -> bool:
     return True
 
 
+MAX_OTP_RETRIES = 3
+
+
 def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False, capture_reorder: bool = False):
     log.info("=" * 50)
     log.info(f"Cibus Daily Buy — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'} | Headless: {headless}")
     log.info("=" * 50)
 
-    with sync_playwright() as p:
-        browser, context, page = _launch_browser(p, headless, fresh_login)
-        try:
-            # Step 1: Navigate to Cibus
-            log.info(f"Navigating to {CIBUS_URL}")
-            page.goto(CIBUS_URL, wait_until="domcontentloaded")
-            time.sleep(2)
-            take_screenshot(page, "01_homepage")
-
-            # Step 2: Login
-            login(page, context)
-
-            # Step 3: Capture mode (early return)
-            if capture_reorder:
-                return _capture_reorder_mode(page)
-
-            # Step 4: Check budget and choose coupon amount
-            coupon_amount = check_budget(page)
-
-            # Step 5: Navigate to restaurant
-            navigate_to_restaurant(page)
-
-            # Step 6: Add to cart
-            add_to_cart(page, coupon_amount)
-
-            # Step 7: Checkout
-            checkout_ok = navigate_to_checkout(page)
-
-            # Step 8: Dry run — verify & clean up
-            if dry_run:
-                if checkout_ok:
-                    log.info("DRY RUN — full flow verified successfully!")
-                else:
-                    log.warning("DRY RUN — checkout verification FAILED")
-                cleanup_cart(page, context)
-                log.info("DRY RUN complete")
-                return checkout_ok
-
-            # Step 9: Confirm order (live)
-            if not checkout_ok:
-                raise RuntimeError("Checkout page not ready — aborting")
-            confirm_order(page)
-            return True
-
-        except Exception as e:
-            log.error(f"❌ Error: {e}")
+    for attempt in range(1, MAX_OTP_RETRIES + 1):
+        with sync_playwright() as p:
+            # Force fresh login on retries so stale session state can't interfere
+            effective_fresh = fresh_login or attempt > 1
+            browser, context, page = _launch_browser(p, headless, effective_fresh)
             try:
-                take_screenshot(page, "error")
-            except Exception:
-                pass
-            raise
+                # Step 1: Navigate to Cibus
+                log.info(f"Navigating to {CIBUS_URL}")
+                page.goto(CIBUS_URL, wait_until="domcontentloaded")
+                time.sleep(2)
+                take_screenshot(page, "01_homepage")
 
-        finally:
-            browser.close()
+                # Step 2: Login
+                login(page, context)
+
+                # Step 3: Capture mode (early return)
+                if capture_reorder:
+                    return _capture_reorder_mode(page)
+
+                # Step 4: Check budget and choose coupon amount
+                coupon_amount = check_budget(page)
+
+                # Step 5: Navigate to restaurant
+                navigate_to_restaurant(page)
+
+                # Step 6: Add to cart
+                add_to_cart(page, coupon_amount)
+
+                # Step 7: Checkout
+                checkout_ok = navigate_to_checkout(page)
+
+                # Step 8: Dry run — verify & clean up
+                if dry_run:
+                    if checkout_ok:
+                        log.info("DRY RUN — full flow verified successfully!")
+                    else:
+                        log.warning("DRY RUN — checkout verification FAILED")
+                    cleanup_cart(page, context)
+                    log.info("DRY RUN complete")
+                    return checkout_ok
+
+                # Step 9: Confirm order (live)
+                if not checkout_ok:
+                    raise RuntimeError("Checkout page not ready — aborting")
+                confirm_order(page)
+                return True
+
+            except OTPTimeoutError:
+                log.warning(f"OTP timed out (attempt {attempt}/{MAX_OTP_RETRIES})")
+                if attempt < MAX_OTP_RETRIES:
+                    log.info("Restarting login flow with a fresh browser…")
+                    continue
+                raise RuntimeError(
+                    f"OTP not provided after {MAX_OTP_RETRIES} attempts"
+                )
+
+            except Exception as e:
+                log.error(f"❌ Error: {e}")
+                try:
+                    take_screenshot(page, "error")
+                except Exception:
+                    pass
+                raise
+
+            finally:
+                browser.close()
 
 
 def main():
