@@ -83,25 +83,10 @@ def _launch_browser(p, headless, fresh_login):
     return browser, context, page
 
 
-def _capture_reorder_mode(page) -> bool:
-    """Navigate to order history and log API calls for discovery."""
-    log.info("CAPTURE MODE — navigating to order history")
-    page.goto("https://consumers.pluxee.co.il/restaurants/orders",
-              wait_until="domcontentloaded")
-    page.wait_for_timeout(3000)
-    take_screenshot(page, "orders_page")
-    log.info("CAPTURE MODE — click the reorder button in the browser.")
-    log.info("All API calls are being logged. Waiting 20s...")
-    # Must use Playwright's wait (not time.sleep) to keep the event loop
-    # alive so page.on("request"/"response") handlers fire.
-    page.wait_for_timeout(20_000)
-    return True
-
-
 MAX_OTP_RETRIES = 3
 
 
-def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False, capture_reorder: bool = False):
+def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False):
     log.info("=" * 50)
     log.info(f"Cibus Daily Buy — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'} | Headless: {headless}")
@@ -122,23 +107,19 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False,
                 # Step 2: Login
                 login(page, context)
 
-                # Step 3: Capture mode (early return)
-                if capture_reorder:
-                    return _capture_reorder_mode(page)
-
-                # Step 4: Check budget and choose coupon amount
+                # Step 3: Check budget and choose coupon amount
                 coupon_amount = check_budget(page)
 
-                # Step 5: Navigate to restaurant
+                # Step 4: Navigate to restaurant
                 navigate_to_restaurant(page)
 
-                # Step 6: Add to cart
+                # Step 5: Add to cart
                 add_to_cart(page, coupon_amount)
 
-                # Step 7: Checkout
+                # Step 6: Checkout
                 checkout_ok = navigate_to_checkout(page)
 
-                # Step 8: Dry run — verify & clean up
+                # Step 7: Dry run — verify & clean up
                 if dry_run:
                     if checkout_ok:
                         log.info("DRY RUN — full flow verified successfully!")
@@ -148,7 +129,7 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False,
                     log.info("DRY RUN complete")
                     return checkout_ok
 
-                # Step 9: Confirm order (live)
+                # Step 8: Confirm order (live)
                 if not checkout_ok:
                     raise RuntimeError("Checkout page not ready — aborting")
                 confirm_order(page)
@@ -180,8 +161,6 @@ def main():
     parser.add_argument("--visible", action="store_true", help="Show browser window")
     parser.add_argument("--dry-run", action="store_true", help="Stop before actual purchase")
     parser.add_argument("--fresh-login", action="store_true", help="Ignore saved session and log in from scratch")
-    parser.add_argument("--capture-reorder", action="store_true",
-                        help="Navigate to order history and capture reorder API call")
     parser.add_argument("--log-file", action="store_true",
                         help="Write log output to logs/<timestamp>_run.log in the project root")
     args = parser.parse_args()
@@ -190,6 +169,5 @@ def main():
         log_path = _add_file_logger()
         log.info(f"Logging to file: {log_path}")
 
-    success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login,
-                  capture_reorder=args.capture_reorder)
+    success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login)
     sys.exit(0 if success else 1)

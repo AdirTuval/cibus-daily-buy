@@ -44,7 +44,6 @@ required during login, it is delivered via Telegram or falls back to a terminal 
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather | Optional |
 | `TELEGRAM_CHAT_ID` | Your Telegram user/chat ID | Optional |
 | `RESTAURANT_URL` | Full URL of the restaurant/store page | Optional (has default) |
-| `COUPON_AMOUNT` | Denomination in ILS to purchase (e.g. `30`) | Optional (default: `30`) |
 
 ## Usage
 
@@ -60,6 +59,9 @@ python cibus_daily_buy.py --dry-run
 
 # Ignore saved session and log in from scratch (forces new OTP)
 python cibus_daily_buy.py --fresh-login
+
+# Write log to logs/<timestamp>_run.log (recommended for cron)
+python cibus_daily_buy.py --log-file
 ```
 
 ## Scheduling (cron)
@@ -67,7 +69,7 @@ python cibus_daily_buy.py --fresh-login
 Run automatically every day at 08:00:
 
 ```cron
-0 8 * * * cd /path/to/cibus-daily-buy && .venv/bin/python cibus_daily_buy.py >> cibus.log 2>&1
+0 8 * * * /path/to/cibus-daily-buy/.venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
 ```
 
 ## Telegram OTP setup

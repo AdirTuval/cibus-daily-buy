@@ -21,7 +21,6 @@ python cibus_daily_buy.py                # headless mode (live purchase)
 python cibus_daily_buy.py --visible      # show browser window (debug)
 python cibus_daily_buy.py --dry-run      # navigate but skip purchase, then clean cart
 python cibus_daily_buy.py --fresh-login  # ignore saved session, force new OTP
-python cibus_daily_buy.py --capture-reorder  # navigate to order history, log API calls for 20s
 python cibus_daily_buy.py --log-file     # write log to logs/<timestamp>_run.log in project root
 ```
 
