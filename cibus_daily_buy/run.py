@@ -42,20 +42,9 @@ def _add_file_logger():
 
 def _launch_browser(p, headless, fresh_login):
     """Launch Chromium, create context with optional session, attach API logger."""
-    launch_kwargs = {"headless": headless}
-    if headless:
-        # Suppress the Automation flag that sites use for bot detection
-        launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
-    browser = p.chromium.launch(**launch_kwargs)
+    browser = p.chromium.launch(headless=headless)
 
     context_kwargs = {"viewport": {"width": 1280, "height": 800}, "locale": "he-IL"}
-    if headless:
-        # Replace "HeadlessChrome/..." UA with a normal Chrome UA so the site
-        # cannot detect headless mode via the User-Agent string
-        context_kwargs["user_agent"] = (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-        )
 
     if fresh_login:
         log.info("Fresh login requested — ignoring saved session")
@@ -68,14 +57,6 @@ def _launch_browser(p, headless, fresh_login):
         except FileNotFoundError:
             pass
     context = browser.new_context(**context_kwargs)
-
-    if headless:
-        # Patch JS fingerprint signals before any page script runs
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            if (!window.chrome) { window.chrome = { runtime: {} }; }
-            Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
-        """)
 
     page = context.new_page()
     page.set_default_timeout(NAVIGATION_TIMEOUT)

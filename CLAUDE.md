@@ -12,6 +12,7 @@ A Python Playwright script that automates daily coupon purchases on the Cibus Pl
 cp .env.example .env   # fill in CIBUS_USERNAME, CIBUS_PASSWORD (and optionally Telegram vars)
 pip install -r requirements.txt
 playwright install chromium
+sudo apt install -y xvfb   # virtual display for headless operation
 ```
 
 ## Running
@@ -27,10 +28,10 @@ python cibus_daily_buy.py --log-file     # write log to logs/<timestamp>_run.log
 ## Scheduling (cron)
 
 ```cron
-0 8 * * * .venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
+0 8 * * * xvfb-run /path/to/venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --visible --log-file
 ```
 
-Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
+The `xvfb-run --visible` combo runs the browser in actual visible mode into a virtual framebuffer, bypassing Cibus bot detection that blocks headless Chromium. Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
 
 ## Configuration (`.env`)
 
