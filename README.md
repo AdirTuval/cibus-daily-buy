@@ -8,12 +8,20 @@ Automates daily purchase of a digital supermarket coupon on the
 The script logs in to your Cibus account (reusing a saved session when available to avoid
 repeated OTP prompts), navigates to a configured restaurant/store page, adds the selected
 denomination to the basket, then proceeds to checkout and confirms the order. If an OTP is
-required during login, it is delivered via Telegram or falls back to a terminal prompt.
+required during login, it is delivered via Telegram (with up to 3 automatic retries on
+timeout) or falls back to a terminal prompt when Telegram is not configured.
+
+The browser always runs in visible mode (`headless=False`) to bypass bot detection — a
+virtual framebuffer (`xvfb`) is required on headless servers.
 
 ## Prerequisites
 
 - Python 3.10+
-- Install dependencies:
+- `xvfb` (virtual display, required on headless/server environments):
+  ```bash
+  sudo apt install -y xvfb
+  ```
+- Install Python dependencies:
   ```bash
   pip install -r requirements.txt
   playwright install chromium
@@ -47,30 +55,38 @@ required during login, it is delivered via Telegram or falls back to a terminal 
 
 ## Usage
 
-```bash
-# Live purchase (headless)
-python cibus_daily_buy.py
+`xvfb-run` is required to provide a virtual display (sets `DISPLAY` automatically):
 
-# Show browser window (useful for debugging)
-python cibus_daily_buy.py --visible
+```bash
+# Live purchase
+xvfb-run python cibus_daily_buy.py
 
 # Navigate to checkout but don't confirm the order
-python cibus_daily_buy.py --dry-run
+xvfb-run python cibus_daily_buy.py --dry-run
 
 # Ignore saved session and log in from scratch (forces new OTP)
-python cibus_daily_buy.py --fresh-login
+xvfb-run python cibus_daily_buy.py --fresh-login
 
-# Write log to logs/<timestamp>_run.log (recommended for cron)
-python cibus_daily_buy.py --log-file
+# Write log to logs/<timestamp>_run.log
+xvfb-run python cibus_daily_buy.py --log-file
+
+# Write log to a custom path
+xvfb-run python cibus_daily_buy.py --log-file /path/to/my.log
 ```
+
+A log file is always created on each run; `--log-file` only overrides the destination path.
 
 ## Scheduling (cron)
 
 Run automatically every day at 08:00:
 
 ```cron
-0 8 * * * /path/to/cibus-daily-buy/.venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
+0 8 * * * xvfb-run /path/to/cibus-daily-buy/venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
 ```
+
+`xvfb-run` sets `DISPLAY` and provides a virtual framebuffer so the browser can run in
+visible mode. Paths (`screenshots/`, `session.json`, `logs/`) are anchored to the project
+root, so cron's working directory doesn't matter.
 
 ## Telegram OTP setup
 
@@ -86,7 +102,8 @@ Receiving OTP codes via Telegram lets the script run fully unattended:
 5. Set `TELEGRAM_CHAT_ID=<number>` in `.env`.
 
 When an OTP is needed, the bot will message you asking for the code. Reply with the digits
-and the script will continue automatically.
+and the script will continue automatically. If the OTP times out, the script retries the
+login flow up to 3 times before giving up.
 
 If Telegram is not configured, the script falls back to a terminal `input()` prompt.
 
