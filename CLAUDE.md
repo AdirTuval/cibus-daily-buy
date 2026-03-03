@@ -12,25 +12,28 @@ A Python Playwright script that automates daily coupon purchases on the Cibus Pl
 cp .env.example .env   # fill in CIBUS_USERNAME, CIBUS_PASSWORD (and optionally Telegram vars)
 pip install -r requirements.txt
 playwright install chromium
+sudo apt install -y xvfb   # virtual display for headless operation
 ```
 
 ## Running
 
 ```bash
-python cibus_daily_buy.py                # headless mode (live purchase)
-python cibus_daily_buy.py --visible      # show browser window (debug)
-python cibus_daily_buy.py --dry-run      # navigate but skip purchase, then clean cart
-python cibus_daily_buy.py --fresh-login  # ignore saved session, force new OTP
-python cibus_daily_buy.py --log-file     # write log to logs/<timestamp>_run.log in project root
+xvfb-run python cibus_daily_buy.py                     # live purchase (xvfb required)
+xvfb-run python cibus_daily_buy.py --dry-run           # navigate but skip purchase, then clean cart
+xvfb-run python cibus_daily_buy.py --fresh-login       # ignore saved session, force new OTP
+xvfb-run python cibus_daily_buy.py --log-file          # log to logs/<timestamp>_run.log
+xvfb-run python cibus_daily_buy.py --log-file /my/f.log  # log to custom path
 ```
+
+Note: log file is always created; `--log-file` only overrides the path. `DISPLAY` must be set (xvfb-run sets it automatically).
 
 ## Scheduling (cron)
 
 ```cron
-0 8 * * * .venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
+0 8 * * * xvfb-run /path/to/venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
 ```
 
-Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
+`xvfb-run` sets `DISPLAY` and provides a virtual framebuffer; the browser always runs in visible mode (`headless=False`), bypassing Cibus bot detection. Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
 
 ## Configuration (`.env`)
 
@@ -91,5 +94,5 @@ config  ←── telegram
 - **`wait_and_click()`**: Helper that waits for visibility before clicking, with configurable timeout.
 - **Session persistence**: Saves/loads browser cookies to `session.json` to avoid OTP on every run.
 - **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `SESSION_FILE`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
-- **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the optional file handler (`--log-file`).
+- **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the file handler (always created; `--log-file PATH` overrides the default path).
 - **OTP retry loop**: `run()` in `run.py` retries the full login flow up to `MAX_OTP_RETRIES` (3) times on `OTPTimeoutError`. Retries always use `fresh_login=True` to discard stale session state. `ask_telegram()` waits 9 minutes for a Telegram reply (matching OTP lifetime), sends a reminder every 10 s, then raises `OTPTimeoutError` instead of falling back to terminal input.
