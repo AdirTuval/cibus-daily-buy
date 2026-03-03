@@ -29,20 +29,23 @@ from cibus_daily_buy.purchase import (
 )
 
 
-def _add_file_logger():
-    """Attach a FileHandler to the cibus logger → logs/<ts>_run.log."""
-    os.makedirs(LOG_DIR, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(LOG_DIR, f"{ts}_run.log")
-    handler = logging.FileHandler(log_path)
+def _add_file_logger(path=None):
+    """Attach a FileHandler to the cibus logger. Uses logs/<ts>_run.log if path not given."""
+    if path is None:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(LOG_DIR, f"{ts}_run.log")
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    handler = logging.FileHandler(path)
     handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logging.getLogger("cibus").addHandler(handler)
-    return log_path
+    return path
 
 
-def _launch_browser(p, headless, fresh_login):
-    """Launch Chromium, create context with optional session, attach API logger."""
-    browser = p.chromium.launch(headless=headless)
+def _launch_browser(p, fresh_login):
+    """Launch Chromium in visible mode (requires xvfb on headless servers)."""
+    browser = p.chromium.launch(headless=False)
 
     context_kwargs = {"viewport": {"width": 1280, "height": 800}, "locale": "he-IL"}
 
@@ -67,17 +70,17 @@ def _launch_browser(p, headless, fresh_login):
 MAX_OTP_RETRIES = 3
 
 
-def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False):
+def run(dry_run: bool = False, fresh_login: bool = False):
     log.info("=" * 50)
     log.info(f"Cibus Daily Buy — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'} | Headless: {headless}")
+    log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'}")
     log.info("=" * 50)
 
     for attempt in range(1, MAX_OTP_RETRIES + 1):
         with sync_playwright() as p:
             # Force fresh login on retries so stale session state can't interfere
             effective_fresh = fresh_login or attempt > 1
-            browser, context, page = _launch_browser(p, headless, effective_fresh)
+            browser, context, page = _launch_browser(p, effective_fresh)
             try:
                 # Step 1: Navigate to Cibus
                 log.info(f"Navigating to {CIBUS_URL}")
@@ -138,17 +141,21 @@ def run(headless: bool = True, dry_run: bool = False, fresh_login: bool = False)
 
 
 def main():
+    if not os.environ.get("DISPLAY"):
+        sys.exit(
+            "Error: DISPLAY environment variable is not set.\n"
+            "Run via xvfb-run: xvfb-run python cibus_daily_buy.py"
+        )
+
     parser = argparse.ArgumentParser(description="Cibus Pluxee Daily Auto-Buyer")
-    parser.add_argument("--visible", action="store_true", help="Show browser window")
     parser.add_argument("--dry-run", action="store_true", help="Stop before actual purchase")
     parser.add_argument("--fresh-login", action="store_true", help="Ignore saved session and log in from scratch")
-    parser.add_argument("--log-file", action="store_true",
-                        help="Write log output to logs/<timestamp>_run.log in the project root")
+    parser.add_argument("--log-file", metavar="PATH", nargs="?", const=None,
+                        help="Log file path (default: logs/<timestamp>_run.log). Always created.")
     args = parser.parse_args()
 
-    if args.log_file:
-        log_path = _add_file_logger()
-        log.info(f"Logging to file: {log_path}")
+    log_path = _add_file_logger(args.log_file)
+    log.info(f"Logging to file: {log_path}")
 
-    success = run(headless=not args.visible, dry_run=args.dry_run, fresh_login=args.fresh_login)
+    success = run(dry_run=args.dry_run, fresh_login=args.fresh_login)
     sys.exit(0 if success else 1)
