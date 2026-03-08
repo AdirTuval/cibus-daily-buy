@@ -33,7 +33,7 @@ Note: log file is always created; `--log-file` only overrides the path. `DISPLAY
 0 8 * * * xvfb-run /path/to/venv/bin/python /path/to/cibus-daily-buy/cibus_daily_buy.py --log-file
 ```
 
-`xvfb-run` sets `DISPLAY` and provides a virtual framebuffer; the browser always runs in visible mode (`headless=False`), bypassing Cibus bot detection. Paths (`screenshots/`, `session.json`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
+`xvfb-run` sets `DISPLAY` and provides a virtual framebuffer; the browser always runs in visible mode (`headless=False`), bypassing Cibus bot detection. Paths (`screenshots/`, `chrome_profile/`, `logs/`) are always anchored to the project root via `__file__`, so cron's working directory doesn't matter.
 
 ## Configuration (`.env`)
 
@@ -92,7 +92,7 @@ config  ←── telegram
 - **Defensive selectors**: Multiple CSS/text selector fallbacks for each element, since the site's HTML varies. Catches `PlaywrightTimeoutError` and tries the next selector.
 - **Debug screenshots**: Taken at each major step (named `01_homepage`, `02_login_filled`, etc.) and on errors, saved to `SCREENSHOT_DIR`.
 - **`wait_and_click()`**: Helper that waits for visibility before clicking, with configurable timeout.
-- **Session persistence**: Saves/loads browser cookies to `session.json` to avoid OTP on every run.
-- **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `SESSION_FILE`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
+- **Session persistence**: Uses `launch_persistent_context(PROFILE_DIR)` to keep a full Chrome profile (`chrome_profile/`) on disk. This retains cookies, IndexedDB, Service Workers, and all browser state — unlike `storage_state()` which only captures cookies/storage. `save_session()` is a no-op (the profile auto-persists). `--fresh-login` deletes the profile directory. Stale lock files are cleaned up before launch to handle unclean shutdowns.
+- **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `PROFILE_DIR`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
 - **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the file handler (always created; `--log-file PATH` overrides the default path).
 - **OTP retry loop**: `run()` in `run.py` retries the full login flow up to `MAX_OTP_RETRIES` (3) times on `OTPTimeoutError`. Retries always use `fresh_login=True` to discard stale session state. `ask_telegram()` waits 9 minutes for a Telegram reply (matching OTP lifetime), sends a reminder every 10 s, then raises `OTPTimeoutError` instead of falling back to terminal input.

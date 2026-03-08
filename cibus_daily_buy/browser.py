@@ -1,10 +1,9 @@
-import json
 import os
 from datetime import datetime
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from cibus_daily_buy.config import ACTION_TIMEOUT, SCREENSHOT_DIR, SESSION_FILE, log
+from cibus_daily_buy.config import ACTION_TIMEOUT, SCREENSHOT_DIR, log
 
 
 def take_screenshot(page, name: str):
@@ -27,11 +26,8 @@ def wait_and_click(page, selector: str, description: str, timeout=ACTION_TIMEOUT
 
 
 def save_session(context) -> None:
-    """Persist browser cookies/storage to SESSION_FILE."""
-    state = context.storage_state()
-    with open(SESSION_FILE, "w") as f:
-        json.dump(state, f)
-    log.info(f"Session saved → {SESSION_FILE}")
+    """Session auto-persists via Chrome profile directory."""
+    log.info("Session auto-persisted via Chrome profile")
 
 
 def is_authenticated(page) -> bool:

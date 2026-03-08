@@ -33,6 +33,9 @@ SCREENSHOT_DIR = str(PROJECT_ROOT / "screenshots")
 # Session persistence — avoids triggering OTP on every run
 SESSION_FILE = str(PROJECT_ROOT / "session.json")
 
+# Persistent Chrome profile — retains full browser state (IndexedDB, etc.)
+PROFILE_DIR = str(PROJECT_ROOT / "chrome_profile")
+
 LOG_DIR = str(PROJECT_ROOT / "logs")
 
 # Telegram OTP delivery (optional — falls back to terminal input if not set)

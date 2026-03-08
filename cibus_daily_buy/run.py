@@ -1,7 +1,7 @@
 import argparse
-import json
 import logging
 import os
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -14,7 +14,7 @@ from cibus_daily_buy.config import (
     LOG_DIR,
     LOG_FORMAT,
     NAVIGATION_TIMEOUT,
-    SESSION_FILE,
+    PROFILE_DIR,
     log,
 )
 from cibus_daily_buy.login import login
@@ -43,28 +43,46 @@ def _add_file_logger(path=None):
     return path
 
 
-def _launch_browser(p, fresh_login):
-    """Launch Chromium in visible mode (requires xvfb on headless servers)."""
-    browser = p.chromium.launch(headless=False)
-
-    context_kwargs = {"viewport": {"width": 1280, "height": 800}, "locale": "he-IL"}
-
-    if fresh_login:
-        log.info("Fresh login requested — ignoring saved session")
-    else:
+def _remove_lock_files():
+    """Remove stale Chrome lock files left after unclean shutdowns (e.g. cron kill)."""
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        lock = os.path.join(PROFILE_DIR, name)
         try:
-            with open(SESSION_FILE) as f:
-                # Reusing saved cookies avoids triggering OTP on every run
-                context_kwargs["storage_state"] = json.load(f)
-            log.info(f"Loading session from {SESSION_FILE}")
+            os.remove(lock)
         except FileNotFoundError:
             pass
-    context = browser.new_context(**context_kwargs)
 
-    page = context.new_page()
+
+def _launch_browser(p, fresh_login):
+    """Launch Chromium with a persistent profile (requires xvfb on headless servers)."""
+    if fresh_login:
+        log.info("Fresh login requested — deleting Chrome profile")
+        shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+    else:
+        _remove_lock_files()
+
+    try:
+        context = p.chromium.launch_persistent_context(
+            PROFILE_DIR,
+            headless=False,
+            viewport={"width": 1280, "height": 800},
+            locale="he-IL",
+        )
+    except Exception as e:
+        log.warning(f"Failed to launch with existing profile: {e}")
+        log.info("Deleting corrupted profile and retrying…")
+        shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+        context = p.chromium.launch_persistent_context(
+            PROFILE_DIR,
+            headless=False,
+            viewport={"width": 1280, "height": 800},
+            locale="he-IL",
+        )
+
+    page = context.pages[0] if context.pages else context.new_page()
     page.set_default_timeout(NAVIGATION_TIMEOUT)
     attach_api_logger(page)
-    return browser, context, page
+    return context, page
 
 
 MAX_OTP_RETRIES = 3
@@ -80,7 +98,7 @@ def run(dry_run: bool = False, fresh_login: bool = False):
         with sync_playwright() as p:
             # Force fresh login on retries so stale session state can't interfere
             effective_fresh = fresh_login or attempt > 1
-            browser, context, page = _launch_browser(p, effective_fresh)
+            context, page = _launch_browser(p, effective_fresh)
             try:
                 # Step 1: Navigate to Cibus
                 log.info(f"Navigating to {CIBUS_URL}")
@@ -137,7 +155,7 @@ def run(dry_run: bool = False, fresh_login: bool = False):
                 raise
 
             finally:
-                browser.close()
+                context.close()
 
 
 def main():
