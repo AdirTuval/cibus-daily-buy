@@ -1,12 +1,37 @@
+import json
 import time
 
 import requests
 
-from cibus_daily_buy.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, log
+from cibus_daily_buy.config import PROJECT_ROOT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, log
+
+TELEGRAM_OFFSET_FILE = str(PROJECT_ROOT / "telegram_offset.json")
 
 
 class OTPTimeoutError(Exception):
     """Raised when the user does not reply with an OTP within the deadline."""
+
+
+class UserAbortError(Exception):
+    """Raised when the user explicitly sends 'NO' to abort the script."""
+
+
+def _load_offset() -> int:
+    """Load the last confirmed Telegram update_id from disk. Returns 0 if not found."""
+    try:
+        with open(TELEGRAM_OFFSET_FILE) as f:
+            return json.load(f).get("offset", 0)
+    except (FileNotFoundError, Exception):
+        return 0
+
+
+def _save_offset(offset: int) -> None:
+    """Persist the next expected update_id so future calls skip already-processed updates."""
+    try:
+        with open(TELEGRAM_OFFSET_FILE, "w") as f:
+            json.dump({"offset": offset}, f)
+    except Exception as e:
+        log.warning(f"Failed to save telegram offset: {e}")
 
 
 def send_telegram(text: str) -> bool:
@@ -28,6 +53,37 @@ def send_telegram(text: str) -> bool:
         return False
 
 
+def check_daily_abort() -> None:
+    """Check if the next unprocessed Telegram message is 'NO'. Raise UserAbortError if so."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    offset = _load_offset()
+    try:
+        updates = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": offset, "limit": 20},
+            timeout=10,
+        ).json().get("result", [])
+    except Exception as e:
+        log.warning(f"check_daily_abort: fetch failed, skipping check: {e}")
+        return  # fail open — don't block script on network error
+
+    new_offset = offset
+    for update in updates:
+        new_offset = update["update_id"] + 1
+        msg = update.get("message", {})
+        if msg.get("chat", {}).get("id") != TELEGRAM_CHAT_ID:
+            continue
+        text = msg.get("text", "").strip()
+        if text.upper() == "NO":
+            _save_offset(new_offset)
+            log.info("Pre-run abort: next unprocessed Telegram message is 'NO'")
+            send_telegram("Script aborted for today: received 'NO'")
+            raise UserAbortError("Aborted by user 'NO' message before run")
+
+    _save_offset(new_offset)  # acknowledge all scanned updates, even if no abort
+
+
 def ask_telegram(prompt: str) -> str:
     """
     Send prompt via Telegram and wait for a reply.
@@ -41,18 +97,7 @@ def ask_telegram(prompt: str) -> str:
     if not send_telegram(prompt):
         return input(f"{prompt}: ").strip()
 
-    # Bootstrap offset so we ignore messages older than this moment
-    try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
-            params={"limit": 1, "offset": -1},
-            timeout=10,
-        )
-        updates = r.json().get("result", [])
-        offset = (updates[-1]["update_id"] + 1) if updates else 0
-    except Exception as e:
-        log.warning(f"Telegram getUpdates (bootstrap) error: {e}")
-        return input(f"{prompt}: ").strip()
+    offset = _load_offset()
 
     otp_deadline = 9 * 60  # 9 minutes (OTP expires after 10)
     reminder_interval = 10  # seconds between reminder messages
@@ -68,12 +113,19 @@ def ask_telegram(prompt: str) -> str:
                 timeout=15,
             )
             for update in r.json().get("result", []):
-                offset = update["update_id"] + 1
                 msg = update.get("message", {})
                 if msg.get("chat", {}).get("id") == TELEGRAM_CHAT_ID and "text" in msg:
                     code = msg["text"].strip()
+                    offset = update["update_id"] + 1
+                    _save_offset(offset)  # confirm before acting
+                    if code.upper() == "NO":
+                        log.info("OTP-time abort: user sent 'NO' via Telegram")
+                        send_telegram("Script aborted: received 'NO' during OTP wait")
+                        raise UserAbortError("Aborted by user 'NO' during OTP wait")
                     send_telegram(f"Got it: {code}")
                     return code
+        except UserAbortError:
+            raise
         except Exception as e:
             log.warning(f"Telegram poll error: {e}")
             time.sleep(5)

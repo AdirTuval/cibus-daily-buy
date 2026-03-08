@@ -18,7 +18,7 @@ from cibus_daily_buy.config import (
     log,
 )
 from cibus_daily_buy.login import login
-from cibus_daily_buy.telegram import OTPTimeoutError
+from cibus_daily_buy.telegram import OTPTimeoutError, UserAbortError, check_daily_abort
 from cibus_daily_buy.purchase import (
     add_to_cart,
     check_budget,
@@ -94,6 +94,8 @@ def run(dry_run: bool = False, fresh_login: bool = False):
     log.info(f"Mode: {'DRY RUN' if dry_run else 'LIVE'}")
     log.info("=" * 50)
 
+    check_daily_abort()
+
     for attempt in range(1, MAX_OTP_RETRIES + 1):
         with sync_playwright() as p:
             # Force fresh login on retries so stale session state can't interfere
@@ -137,6 +139,9 @@ def run(dry_run: bool = False, fresh_login: bool = False):
                 confirm_order(page)
                 return True
 
+            except UserAbortError:
+                raise  # intentional — no screenshot, no retry
+
             except OTPTimeoutError:
                 log.warning(f"OTP timed out (attempt {attempt}/{MAX_OTP_RETRIES})")
                 if attempt < MAX_OTP_RETRIES:
@@ -175,5 +180,12 @@ def main():
     log_path = _add_file_logger(args.log_file)
     log.info(f"Logging to file: {log_path}")
 
-    success = run(dry_run=args.dry_run, fresh_login=args.fresh_login)
+    try:
+        success = run(dry_run=args.dry_run, fresh_login=args.fresh_login)
+    except UserAbortError as e:
+        log.info(f"Run aborted intentionally: {e}")
+        sys.exit(0)
+    except Exception as e:
+        log.error(f"Fatal error: {e}")
+        sys.exit(1)
     sys.exit(0 if success else 1)
