@@ -9,3 +9,4 @@ __pycache__/
 *.log
 logs/
 chrome_profile/
+telegram_offset.json

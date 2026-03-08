@@ -59,7 +59,7 @@ cibus_daily_buy/
     __init__.py                 # empty
     __main__.py                 # python -m cibus_daily_buy support
     config.py                   # all constants, env loading, logger
-    telegram.py                 # OTPTimeoutError, send_telegram, ask_telegram
+    telegram.py                 # OTPTimeoutError, UserAbortError, send_telegram, ask_telegram, check_daily_abort
     browser.py                  # take_screenshot, wait_and_click, save_session, is_authenticated, attach_api_logger
     login.py                    # login flow + OTP
     purchase.py                 # restaurant nav, add to cart, checkout, confirm, cleanup
@@ -96,3 +96,4 @@ config  ←── telegram
 - **`__file__`-anchored paths**: `SCREENSHOT_DIR`, `PROFILE_DIR`, and `LOG_DIR` in `config.py` are resolved relative to the package, not the cwd. Safe to run from cron or any directory.
 - **`LOG_FORMAT`**: Single format string constant shared by the stdout handler (`basicConfig`) and the file handler (always created; `--log-file PATH` overrides the default path).
 - **OTP retry loop**: `run()` in `run.py` retries the full login flow up to `MAX_OTP_RETRIES` (3) times on `OTPTimeoutError`. Retries always use `fresh_login=True` to discard stale session state. `ask_telegram()` waits 9 minutes for a Telegram reply (matching OTP lifetime), sends a reminder every 10 s, then raises `OTPTimeoutError` instead of falling back to terminal input.
+- **Remote abort**: `check_daily_abort()` runs before each purchase flow. It scans unprocessed Telegram messages (tracked via `telegram_offset.json`) and raises `UserAbortError` if the next message is "NO". Sending "NO" during the OTP wait also aborts. The offset file persists the last-processed `update_id` so messages are never re-read.
