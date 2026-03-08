@@ -97,16 +97,26 @@ def confirm_order(page) -> None:
 
 
 def _confirm_deletion(page) -> None:
-    """Handle the deletion confirmation dialog."""
-    try:
-        confirm_delete = page.locator('button:has-text("כן, למחוק")')
-        confirm_delete.wait_for(state="visible", timeout=ACTION_TIMEOUT)
-        confirm_delete.click()
-        time.sleep(2)
-        take_screenshot(page, "10_after_confirm_delete")
-        log.info("Confirmed cart item deletion")
-    except Exception as e:
-        log.warning(f"No confirmation dialog found: {e}")
+    """Handle the deletion confirmation dialog after trash click."""
+    confirm_selectors = [
+        'button:has-text("כן, למחוק")',
+        'text="כן, למחוק"',
+        ':text("למחוק")',
+    ]
+    for sel in confirm_selectors:
+        try:
+            btn = page.locator(sel).first
+            if btn.is_visible(timeout=5000):
+                log.info(f"Found confirm-delete button: {sel}")
+                btn.click()
+                time.sleep(2)
+                take_screenshot(page, "10_after_confirm_delete")
+                log.info("Confirmed cart item deletion")
+                return
+        except Exception:
+            continue
+    log.warning("Could not find confirm-delete button in dialog")
+    take_screenshot(page, "10_confirm_delete_failed")
 
 
 def cleanup_cart(page, context) -> None:
